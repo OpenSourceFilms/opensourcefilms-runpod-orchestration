@@ -120,6 +120,17 @@ the generated bootstrap block) install small `main-*` commands on `$PATH`:
   worker back to `mainvolume:/workspace/_h200_writeback/<subdir>/`, the
   writeback location `osf-main-up` creates automatically.
 
+## Security note on the generated bootstrap block
+
+`print-b300-worker-bootstrap-b64`'s output (step 2 above) is not a template —
+it's a fully resolved shell block containing a real base64-encoded SSH
+private key and, if `HF_TOKEN` is set, a real HuggingFace token, printed to
+stdout in plaintext. That's by design (it's meant to be pasted straight into
+a new pod's terminal), but it means the printed output itself is
+credential-bearing for as long as it exists anywhere. Paste it directly; do
+not redirect it to a file, log it, or commit it anywhere. Treat it the same
+as you would a raw private key.
+
 ## Known limitations
 
 - **Directory layout is load-bearing.** These scripts reference each other by
