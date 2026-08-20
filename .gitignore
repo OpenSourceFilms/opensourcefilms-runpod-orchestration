@@ -1,0 +1,7 @@
+transfer_ssh/
+*.env
+!examples/*.env.example
+authorized_client_keys
+main_host.env
+*.bak_*
+.DS_Store

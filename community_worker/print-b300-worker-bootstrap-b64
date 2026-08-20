@@ -1,0 +1,165 @@
+#!/bin/bash
+set -o pipefail
+
+KEY="/workspace/_community_worker/transfer_ssh/id_ed25519"
+
+mkdir -p /workspace/_community_worker/transfer_ssh /workspace/bin
+chmod 700 /workspace/_community_worker/transfer_ssh
+
+if [ ! -s "$KEY" ]; then
+  ssh-keygen -t ed25519 -f "$KEY" -N "" -q -C "osf-community-worker"
+fi
+
+PUB="$(ssh-keygen -y -f "$KEY") osf-community-worker"
+
+/workspace/_osf_pod_link/osf-main-up "$PUB" >/dev/null
+
+if [ -f /workspace/_osf_pod_link/main.env ]; then
+  . /workspace/_osf_pod_link/main.env
+fi
+
+MAIN_PUBLIC_IP="${MAIN_PUBLIC_IP:-${RUNPOD_PUBLIC_IP:-}}"
+MAIN_TCP_PORT_22="${MAIN_TCP_PORT_22:-${RUNPOD_TCP_PORT_22:-}}"
+
+if [ -z "$MAIN_PUBLIC_IP" ] || [ -z "$MAIN_TCP_PORT_22" ]; then
+  echo "Missing mainvolume public IP or SSH TCP port. Run /workspace/_osf_pod_link/osf-main-up first."
+  exit 1
+fi
+
+HF_TOKEN_VALUE="${HF_TOKEN:-}"
+if [ -z "$HF_TOKEN_VALUE" ] && [ -s /workspace/_secrets/hf_token ]; then
+  HF_TOKEN_VALUE="$(tr -d '[:space:]' < /workspace/_secrets/hf_token)"
+fi
+
+KEY_B64="$(base64 -w0 "$KEY")"
+
+read -r -p "Install ComfyGeneral + SeedVR2? [y]: " A; A="${A:-y}"; [[ "$A" =~ ^[Yy] ]] && INSTALL_GENERAL=1 || INSTALL_GENERAL=0
+read -r -p "Install WAN VACE? [n]: " A; A="${A:-n}"; [[ "$A" =~ ^[Yy] ]] && INSTALL_WAN=1 || INSTALL_WAN=0
+read -r -p "Install VideoMaMa + SAM3 nodes? [n]: " A; A="${A:-n}"; [[ "$A" =~ ^[Yy] ]] && INSTALL_VIDEOMAMA=1 || INSTALL_VIDEOMAMA=0
+read -r -p "Install EffectErase runtime? [n]: " A; A="${A:-n}"; [[ "$A" =~ ^[Yy] ]] && INSTALL_EFFECTERASE=1 || INSTALL_EFFECTERASE=0
+read -r -p "Fetch WAN 2.2 I2V models if needed? [y]: " A; A="${A:-y}"; [[ "$A" =~ ^[Yy] ]] && FETCH_WAN22_I2V=1 || FETCH_WAN22_I2V=0
+read -r -p "Pull/install SAM3 if needed? [y]: " A; A="${A:-y}"; [[ "$A" =~ ^[Yy] ]] && PULL_SAM3=1 || PULL_SAM3=0
+
+cat <<EOF
+mkdir -p /workspace/_worker_bootstrap /workspace/bin /workspace/mainvolume_pull /workspace/_secrets /root/.ssh
+chmod 700 /root/.ssh
+
+cat > /root/.ssh/osf_mainvolume_id_ed25519.b64 <<'KEYB64'
+$KEY_B64
+KEYB64
+
+base64 -d /root/.ssh/osf_mainvolume_id_ed25519.b64 > /root/.ssh/osf_mainvolume_id_ed25519
+chmod 600 /root/.ssh/osf_mainvolume_id_ed25519
+rm -f /root/.ssh/osf_mainvolume_id_ed25519.b64
+ssh-keygen -y -f /root/.ssh/osf_mainvolume_id_ed25519 > /root/.ssh/osf_mainvolume_id_ed25519.pub
+
+cat > /root/.ssh/config <<'SSHCFG'
+Host mainvolume
+  HostName $MAIN_PUBLIC_IP
+  Port $MAIN_TCP_PORT_22
+  User root
+  IdentityFile /root/.ssh/osf_mainvolume_id_ed25519
+  IdentitiesOnly yes
+  BatchMode yes
+  StrictHostKeyChecking accept-new
+  ServerAliveInterval 15
+  ServerAliveCountMax 3
+SSHCFG
+
+chmod 600 /root/.ssh/config
+
+cat > /workspace/_secrets/hf_token <<'HFTOKEN'
+$HF_TOKEN_VALUE
+HFTOKEN
+chmod 600 /workspace/_secrets/hf_token
+export HF_TOKEN="$HF_TOKEN_VALUE"
+
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client rsync git git-lfs curl ca-certificates ffmpeg unzip python3 python3-venv python3-pip python3-dev build-essential ninja-build pkg-config libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 jq less procps psmisc
+
+git lfs install || true
+
+cat > /workspace/bin/main-host <<'HELPER'
+#!/bin/bash
+echo mainvolume
+HELPER
+
+cat > /workspace/bin/main-test-link <<'HELPER'
+#!/bin/bash
+ssh mainvolume 'hostname; df -h /workspace; ls -ld /workspace/footage /workspace/_h200_writeback /workspace/_worker_bootstrap'
+HELPER
+
+cat > /workspace/bin/main-ls <<'HELPER'
+#!/bin/bash
+REMOTE="\${1:-/workspace/footage}"
+ssh mainvolume "ls -lah \\"\$REMOTE\\""
+HELPER
+
+cat > /workspace/bin/main-find-footage <<'HELPER'
+#!/bin/bash
+PATTERN="\${1:-}"
+MAX="\${2:-200}"
+if [ -z "\$PATTERN" ]; then
+  echo "Usage: main-find-footage PATTERN [MAX_RESULTS]"
+else
+  ssh mainvolume "find /workspace/footage -iname '*\$PATTERN*' -print | head -n \$MAX"
+fi
+HELPER
+
+cat > /workspace/bin/main-find <<'HELPER'
+#!/bin/bash
+REMOTE="\${1:-/workspace/footage}"
+PATTERN="\${2:-*}"
+MAX="\${3:-200}"
+ssh mainvolume "find \\"\$REMOTE\\" -iname '\$PATTERN' -print | head -n \$MAX"
+HELPER
+
+cat > /workspace/bin/main-du <<'HELPER'
+#!/bin/bash
+REMOTE="\${1:-/workspace/footage}"
+ssh mainvolume "du -sh \\"\$REMOTE\\" 2>/dev/null; du -sh \\"\$REMOTE\\"/* 2>/dev/null | sort -h | tail -40"
+HELPER
+
+cat > /workspace/bin/main-pull <<'HELPER'
+#!/bin/bash
+SRC="\${1:-}"
+DST="\${2:-/workspace/mainvolume_pull/}"
+if [ -z "\$SRC" ]; then
+  echo "Usage: main-pull /workspace/remote/path [local_destination_dir]"
+else
+  mkdir -p "\$DST"
+  rsync -rltD -s --no-owner --no-group --no-perms --partial --info=progress2 -e "ssh" mainvolume:"\$SRC" "\$DST"
+fi
+HELPER
+
+cat > /workspace/bin/main-push <<'HELPER'
+#!/bin/bash
+SRC="\${1:-}"
+SUBDIR="\${2:-outputs}"
+if [ -z "\$SRC" ]; then
+  echo "Usage: main-push /local/file/or/folder [outputs|logs|workflows|custom_subdir]"
+else
+  ssh mainvolume "mkdir -p /workspace/_h200_writeback/\$SUBDIR"
+  rsync -rltD -s --no-owner --no-group --no-perms --partial --info=progress2 -e "ssh" "\$SRC" mainvolume:/workspace/_h200_writeback/"\$SUBDIR"/
+fi
+HELPER
+
+chmod +x /workspace/bin/main-host /workspace/bin/main-test-link /workspace/bin/main-ls /workspace/bin/main-find-footage /workspace/bin/main-find /workspace/bin/main-du /workspace/bin/main-pull /workspace/bin/main-push
+export PATH="/workspace/bin:\$PATH"
+
+main-test-link
+
+scp mainvolume:/workspace/_worker_bootstrap/bootstrap-heavy-comfy-worker.sh /workspace/_worker_bootstrap/bootstrap-heavy-comfy-worker.sh
+chmod +x /workspace/_worker_bootstrap/bootstrap-heavy-comfy-worker.sh
+
+OSF_MAIN_SSH_KEY_B64="$KEY_B64" \\
+HF_TOKEN="$HF_TOKEN_VALUE" \\
+INSTALL_GENERAL=$INSTALL_GENERAL \\
+INSTALL_WAN=$INSTALL_WAN \\
+INSTALL_VIDEOMAMA=$INSTALL_VIDEOMAMA \\
+INSTALL_EFFECTERASE=$INSTALL_EFFECTERASE \\
+FETCH_WAN22_I2V=$FETCH_WAN22_I2V \\
+PULL_SAM3=$PULL_SAM3 \\
+MAIN_POD_HOST=mainvolume \\
+bash /workspace/_worker_bootstrap/bootstrap-heavy-comfy-worker.sh
+EOF

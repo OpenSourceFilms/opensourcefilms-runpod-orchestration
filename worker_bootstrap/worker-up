@@ -1,0 +1,3 @@
+#!/bin/bash
+set -o pipefail
+echo "Use print-b300-worker-bootstrap-b64 on mainvolume for the current B300 workflow."

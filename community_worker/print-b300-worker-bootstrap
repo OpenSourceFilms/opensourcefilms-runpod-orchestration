@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -o pipefail
+
+KEY="/workspace/_community_worker/transfer_ssh/id_ed25519"
+
+if [ ! -s "$KEY" ]; then
+  mkdir -p /workspace/_community_worker/transfer_ssh
+  chmod 700 /workspace/_community_worker/transfer_ssh
+  ssh-keygen -t ed25519 -f "$KEY" -N "" -q -C "osf-community-worker"
+fi
+
+PUB="$(ssh-keygen -y -f "$KEY") osf-community-worker"
+
+if [ -x /workspace/_osf_pod_link/osf-main-up ]; then
+  /workspace/_osf_pod_link/osf-main-up "$PUB" >/dev/null
+fi
+
+if [ -f /workspace/_osf_pod_link/main.env ]; then
+  . /workspace/_osf_pod_link/main.env
+fi
+
+MAIN_PUBLIC_IP="${MAIN_PUBLIC_IP:-${RUNPOD_PUBLIC_IP:-}}"
+MAIN_TCP_PORT_22="${MAIN_TCP_PORT_22:-${RUNPOD_TCP_PORT_22:-}}"
+
+if [ -z "$MAIN_PUBLIC_IP" ] || [ -z "$MAIN_TCP_PORT_22" ]; then
+  echo "Missing MAIN_PUBLIC_IP or MAIN_TCP_PORT_22. Run /workspace/_osf_pod_link/osf-main-up first."
+  exit 1
+fi
+
+read -r -p "Install ComfyGeneral + SeedVR2? [y]: " A; A="${A:-y}"; [[ "$A" =~ ^[Yy] ]] && INSTALL_GENERAL=1 || INSTALL_GENERAL=0
+read -r -p "Install WAN VACE? [n]: " A; A="${A:-n}"; [[ "$A" =~ ^[Yy] ]] && INSTALL_WAN=1 || INSTALL_WAN=0
+read -r -p "Install VideoMaMa + SAM3 nodes? [n]: " A; A="${A:-n}"; [[ "$A" =~ ^[Yy] ]] && INSTALL_VIDEOMAMA=1 || INSTALL_VIDEOMAMA=0
+read -r -p "Install EffectErase runtime? [n]: " A; A="${A:-n}"; [[ "$A" =~ ^[Yy] ]] && INSTALL_EFFECTERASE=1 || INSTALL_EFFECTERASE=0
+read -r -p "Pull/install shared models where available? [y]: " A; A="${A:-y}"; [[ "$A" =~ ^[Yy] ]] && PULL_SAM3=1 || PULL_SAM3=0
+
+echo
+echo "=== Paste the block below into the manually launched B300 worker pod ==="
+echo
+
+cat <<EOF
+mkdir -p /workspace/_worker_bootstrap /workspace/bin /root/.ssh
+chmod 700 /root/.ssh
+
+cat > /root/.ssh/osf_mainvolume_id_ed25519 <<'KEY'
+$(cat "$KEY")
+KEY
+
+chmod 600 /root/.ssh/osf_mainvolume_id_ed25519
+
+cat > /root/.ssh/config <<'SSHCFG'
+Host mainvolume
+  HostName $MAIN_PUBLIC_IP
+  Port $MAIN_TCP_PORT_22
+  User root
+  IdentityFile /root/.ssh/osf_mainvolume_id_ed25519
+  IdentitiesOnly yes
+  BatchMode yes
+  StrictHostKeyChecking accept-new
+  ServerAliveInterval 15
+  ServerAliveCountMax 3
+SSHCFG
+
+chmod 600 /root/.ssh/config
+
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client rsync git git-lfs curl ca-certificates ffmpeg unzip python3 python3-venv python3-pip python3-dev build-essential ninja-build pkg-config libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 jq procps psmisc
+
+git lfs install || true
+
+ssh mainvolume 'hostname; df -h /workspace; ls -ld /workspace/_worker_bootstrap /workspace/footage /workspace/_h200_writeback'
+
+scp mainvolume:/workspace/_worker_bootstrap/bootstrap-heavy-comfy-worker.sh /workspace/_worker_bootstrap/bootstrap-heavy-comfy-worker.sh
+chmod +x /workspace/_worker_bootstrap/bootstrap-heavy-comfy-worker.sh
+
+INSTALL_GENERAL=$INSTALL_GENERAL \\
+INSTALL_WAN=$INSTALL_WAN \\
+INSTALL_VIDEOMAMA=$INSTALL_VIDEOMAMA \\
+INSTALL_EFFECTERASE=$INSTALL_EFFECTERASE \\
+PULL_SAM3=$PULL_SAM3 \\
+MAIN_POD_HOST=mainvolume \\
+bash /workspace/_worker_bootstrap/bootstrap-heavy-comfy-worker.sh
+EOF

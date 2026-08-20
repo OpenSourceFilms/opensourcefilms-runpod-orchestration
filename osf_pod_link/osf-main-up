@@ -1,0 +1,130 @@
+#!/bin/bash
+set -o pipefail
+
+BASE="/workspace/_osf_pod_link"
+AUTH="$BASE/authorized_client_keys"
+CLIENT_PUBKEY="${1:-${CLIENT_PUBKEY:-}}"
+
+mkdir -p "$BASE" /workspace/bin /root/.ssh /workspace/_h200_writeback/outputs /workspace/_h200_writeback/logs /workspace/_h200_writeback/workflows
+chmod 700 /root/.ssh
+touch "$AUTH" /root/.ssh/authorized_keys
+chmod 600 "$AUTH" /root/.ssh/authorized_keys
+
+if ! command -v sshd >/dev/null 2>&1 || ! command -v rsync >/dev/null 2>&1; then
+  apt-get update >/dev/null
+  DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server rsync >/dev/null
+fi
+
+if [ -n "$CLIENT_PUBKEY" ]; then
+  if echo "$CLIENT_PUBKEY" | grep -qE '^ssh-(ed25519|rsa|ecdsa) '; then
+    printf '%s\n' "$CLIENT_PUBKEY" >> "$AUTH"
+  else
+    echo "WARNING: ignored invalid public key. It must start with ssh-ed25519, ssh-rsa, or ssh-ecdsa."
+  fi
+fi
+
+python3 - "$AUTH" /root/.ssh/authorized_keys <<'PY'
+from pathlib import Path
+import sys
+
+auth = Path(sys.argv[1])
+root_auth = Path(sys.argv[2])
+
+def parse_key(line):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    parts = line.split()
+    if len(parts) < 2:
+        return None
+    key_type, body = parts[0], parts[1]
+    if not key_type.startswith("ssh-"):
+        return None
+    comment = " ".join(parts[2:]).strip()
+    full = f"{key_type} {body}" + (f" {comment}" if comment else "")
+    return key_type, body, full
+
+lines = []
+for p in (auth, root_auth):
+    if p.exists():
+        lines.extend(p.read_text().splitlines())
+
+seen = set()
+out = []
+for line in lines:
+    parsed = parse_key(line)
+    if not parsed:
+        continue
+    key_type, body, full = parsed
+    k = (key_type, body)
+    if k in seen:
+        continue
+    seen.add(k)
+    out.append(full)
+
+text = "\n".join(out) + ("\n" if out else "")
+auth.write_text(text)
+root_auth.write_text(text)
+PY
+
+chmod 600 "$AUTH" /root/.ssh/authorized_keys
+chmod -R 777 /workspace/_h200_writeback
+
+service ssh start 2>/dev/null || /etc/init.d/ssh start 2>/dev/null || true
+
+if [ -n "${RUNPOD_POD_ID:-}" ]; then
+  MAIN_POD_HOST="${RUNPOD_POD_ID}.runpod.internal"
+else
+  MAIN_POD_HOST="$(hostname).runpod.internal"
+fi
+
+cat > "$BASE/main_host.env" <<EOF
+MAIN_POD_HOST=$MAIN_POD_HOST
+MAIN_POD_ID=${RUNPOD_POD_ID:-unknown}
+MAIN_PUBLIC_IP=${RUNPOD_PUBLIC_IP:-unknown}
+MAIN_TCP_PORT_22=${RUNPOD_TCP_PORT_22:-unknown}
+EOF
+
+cat > "$BASE/main.env" <<EOF
+MAIN_POD_HOST=$MAIN_POD_HOST
+MAIN_POD_ID=${RUNPOD_POD_ID:-unknown}
+MAIN_VOLUME_ID=${RUNPOD_VOLUME_ID:-unknown}
+MAIN_DC_ID=${RUNPOD_DC_ID:-unknown}
+MAIN_PUBLIC_IP=${RUNPOD_PUBLIC_IP:-unknown}
+MAIN_TCP_PORT_22=${RUNPOD_TCP_PORT_22:-unknown}
+MAIN_POD_HOSTNAME=${RUNPOD_POD_HOSTNAME:-unknown}
+MAIN_CONTAINER_HOSTNAME=$(hostname)
+updated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+
+cat > /workspace/bin/osf-main-status <<'STATUS'
+#!/bin/bash
+BASE="/workspace/_osf_pod_link"
+echo "=== main env ==="
+cat "$BASE/main.env" 2>/dev/null || true
+echo
+echo "=== authorized client keys ==="
+cat "$BASE/authorized_client_keys" 2>/dev/null || true
+echo
+echo "=== root authorized_keys ==="
+cat /root/.ssh/authorized_keys 2>/dev/null || true
+echo
+echo "=== writeback ==="
+ls -ld /workspace/_h200_writeback /workspace/_h200_writeback/* 2>/dev/null || true
+echo
+echo "=== sshd ==="
+pgrep -a sshd || true
+STATUS
+
+chmod +x /workspace/bin/osf-main-status
+
+grep -q 'export PATH="/workspace/bin:/workspace/_osf_pod_link:/workspace/_community_worker:/workspace/_worker_bootstrap:$PATH"' /root/.bashrc 2>/dev/null || echo 'export PATH="/workspace/bin:/workspace/_osf_pod_link:/workspace/_community_worker:/workspace/_worker_bootstrap:$PATH"' >> /root/.bashrc
+export PATH="/workspace/bin:/workspace/_osf_pod_link:/workspace/_community_worker:/workspace/_worker_bootstrap:$PATH"
+
+echo "=== mainvolume link ready ==="
+cat "$BASE/main.env"
+echo
+echo "Public SSH fallback:"
+echo "  root@${RUNPOD_PUBLIC_IP:-unknown} -p ${RUNPOD_TCP_PORT_22:-unknown}"
+echo
+osf-main-status

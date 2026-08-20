@@ -1,0 +1,7 @@
+#!/bin/bash
+set -o pipefail
+
+echo "The Runpod REST API currently rejects B300 even though the web UI can launch it."
+echo "Launch the B300 manually in the Runpod UI, then use the generated paste block."
+echo
+exec /workspace/_community_worker/print-b300-worker-bootstrap-b64
