@@ -1,0 +1,32 @@
+name: RunPod orchestration offline self-check
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/selfcheck.yml"
+      - "osf_pod_link/**"
+      - "worker_bootstrap/**"
+      - "community_worker/**"
+      - "tests/**"
+  pull_request:
+    paths:
+      - ".github/workflows/selfcheck.yml"
+      - "osf_pod_link/**"
+      - "worker_bootstrap/**"
+      - "community_worker/**"
+      - "tests/**"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: runpod-syntax-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  selfcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate shell scripts and tracked secret patterns
+        run: bash tests/selfcheck.sh
