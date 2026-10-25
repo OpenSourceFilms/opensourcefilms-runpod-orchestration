@@ -97,6 +97,10 @@ tests/selfcheck.sh    syntax + no-committed-secrets check
   `/workspace/_secrets/hf_token`, `OSF_MAIN_SSH_KEY_B64`) and never contain a
   real value in source.
 
+For the subsequent multi-pod GPU scheduling design and lessons learned, see
+[`docs/fleet-gpu-scheduling.md`](docs/fleet-gpu-scheduling.md). The actual
+privileged fleet service is not bundled here.
+
 See `RUNPOD.md` for the full deployment guide, and `tests/selfcheck.sh` for
 what was actually verified before this was published.
 
