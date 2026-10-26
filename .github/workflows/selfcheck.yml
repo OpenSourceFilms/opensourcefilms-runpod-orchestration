@@ -11,6 +11,10 @@ on:
       - "examples/fleet_**"
       - "docs/fleet-admission-offline-demo.md"
       - "docs/fleet-gpu-scheduling.md"
+      - "docs/SECURITY_BOUNDARIES.md"
+      - "README.md"
+      - "RUNPOD.md"
+      - ".gitignore"
   pull_request:
     paths:
       - ".github/workflows/selfcheck.yml"
@@ -21,6 +25,10 @@ on:
       - "examples/fleet_**"
       - "docs/fleet-admission-offline-demo.md"
       - "docs/fleet-gpu-scheduling.md"
+      - "docs/SECURITY_BOUNDARIES.md"
+      - "README.md"
+      - "RUNPOD.md"
+      - ".gitignore"
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,6 +44,8 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Validate shell scripts and tracked secret patterns
         run: bash tests/selfcheck.sh
+      - name: Check public security disclosures and tracked secret hygiene
+        run: python3 -B -m unittest discover -s tests -p 'test_publication_safety.py' -v
       - name: Check synthetic fleet GPU admission and CLI
         run: |
           python3 -B -m unittest discover -s tests -p 'test_fleet_admission.py' -v

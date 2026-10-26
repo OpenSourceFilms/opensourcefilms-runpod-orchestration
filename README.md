@@ -1,5 +1,13 @@
 # Runpod Pod Orchestration
 
+**Historical, security-sensitive code, not a current deployment recipe.**
+These scripts were used with root SSH access, a potentially **reused worker
+private key**, and a `chmod -R 777` writeback tree. The generated bootstrap
+commands may expose real SSH/Hugging Face credentials in terminal output.
+Read [Security boundaries](docs/SECURITY_BOUNDARIES.md) before running
+anything. This repository's CI is offline and does **not** certify that a
+deployed pod is secure.
+
 Shell scripts Open Source Films (OSF) built to run a multi-pod Runpod setup for
 GPU-heavy ComfyUI video work: one persistent "mainvolume" pod holding shared
 storage and models, and one or more worker pods that attach to it over SSH,

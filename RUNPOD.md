@@ -1,5 +1,13 @@
 # Running on Runpod
 
+**Safety warning (historical only):** The original scripts enable root SSH,
+reuse a stored bootstrap-worker SSH key across invocations, embed private
+credentials in generated paste blocks, and set the historical writeback
+tree to world-writable permissions. Read
+[Security boundaries](docs/SECURITY_BOUNDARIES.md) before considering
+reuse. None of these behaviours has been remediated or validated against
+current production infrastructure.
+
 This is the actual deployment guide for the scripts in this repo, written from
 what they do and how they were run, not a generic Runpod tutorial.
 
@@ -47,9 +55,12 @@ bash community_worker/create-b300-comfy-worker
 This prints a message about the B300-specific Runpod API limitation (see
 below), then runs `print-b300-worker-bootstrap-b64`, which:
 
-1. Generates a fresh, throwaway SSH key pair for the new worker
-   (`community_worker/transfer_ssh/` — not included in this repo, generated
-   fresh on each pod).
+1. Uses the **persisted** SSH key pair from
+   `/workspace/_community_worker/transfer_ssh/`. It creates the pair
+   **only if no private key is already present**, so successive workers
+   may share the same private key. The earlier description of a new,
+   throwaway key on every call was incorrect. The key is not bundled
+   in this public repository.
 2. Authorizes that key's public half on the mainvolume pod automatically
    (calls `osf_pod_link/osf-main-up` for you).
 3. Reads the current `HF_TOKEN` (from the environment, or
@@ -63,10 +74,11 @@ below), then runs `print-b300-worker-bootstrap-b64`, which:
    into `worker_bootstrap/bootstrap-heavy-comfy-worker.sh` — ready to paste
    directly into a new pod's terminal.
 
-There is also a non-base64 variant, `print-b300-worker-bootstrap`, which
-writes the SSH key to disk on the worker via an interactive prompt sequence
-instead of embedding it inline. The base64 variant is what was actually used
-day to day — fewer steps, no separate `scp` needed.
+There is also a non-base64 variant,
+`print-b300-worker-bootstrap`, which **also embeds the complete private
+SSH key in its printed shell block**, this time as literal key text rather
+than base64. Neither variant is a safe secret-delivery mechanism. The
+base64 variant was used historically because it required fewer steps.
 
 ## Step 3: launch the worker pod and paste the block
 
@@ -127,9 +139,12 @@ it's a fully resolved shell block containing a real base64-encoded SSH
 private key and, if `HF_TOKEN` is set, a real HuggingFace token, printed to
 stdout in plaintext. That's by design (it's meant to be pasted straight into
 a new pod's terminal), but it means the printed output itself is
-credential-bearing for as long as it exists anywhere. Paste it directly; do
-not redirect it to a file, log it, or commit it anywhere. Treat it the same
-as you would a raw private key.
+credential-bearing for as long as it exists anywhere. **Base64 is not
+encryption.** Do not redirect a generated block to a file, log it, record it,
+post it or commit it. Treat either variant's output as a raw private key.
+The scripts also use `StrictHostKeyChecking accept-new` and may retain the
+same key across workers. See [Security boundaries](docs/SECURITY_BOUNDARIES.md)
+for the full trust-boundary and key-lifecycle limitations.
 
 ## Known limitations
 
