@@ -26,20 +26,26 @@ candidate. All names, timestamps and capacities are fabricated.
 ## Deliberately narrow contract
 
 `examples/fleet_snapshot.example.json` documents the
-`example.fleet-admission/1` **illustrative format**, *not* a RunPod or OSF
+`example.fleet-admission/2` **illustrative format**, *not* a RunPod or OSF
 service API:
 
 | Field | Meaning |
 |---|---|
 | `now_unix`, `max_age_seconds` | Reference time and strict maximum allowed observation age |
-| `request.job_key`, `request.project` | Duplicate-detection key and project policy identity |
+| `request.job_key`, `request.project` | Project-scoped duplicate-detection identity: the pair `(project, job_key)` must match |
 | `request.vram_mib`, `architecture`, `required_tags` | Minimum native broker capacity and requested GPU/software compatibility |
-| `existing_jobs` | Authoritatively sourced job identities/states; queued, leased, running or uncertain means **do not resubmit** |
+| `existing_jobs[]` | Requires `project`, `job_key` and `state` on every record. Queued, leased, running or uncertain blocks resubmission **only for that same project-and-key pair**. Missing project identity invalidates the entire snapshot. |
 | `pods[].pod_id`, `observed_at_unix` | Current pod ID and observation age; future/stale observations fail closed |
 | `pods[].authenticated`, `healthy` | **Trusted producer assertions**, not credentials; untrusted input must never assert them |
 | `pods[].allowed_projects`, `architecture`, `tags` | Explicit access controls and compatibility evidence |
 | `pods[].broker_admittable_mib` | Broker-reported currently claimable amount **after native claims and reserves**; not the VRAM reported by `nvidia-smi` |
 | `pods[].native_waiters` | A non-empty native FIFO queue blocks this example's immediate-placement advice |
+
+Version 2 corrects a v1 ambiguity: two projects could use the same `job_key`,
+but v1's projectless `existing_jobs` records made unrelated active jobs
+appear to be duplicates. The v2 planner rejects old snapshots instead of
+silently assuming those keys are globally unique. Job project attribution
+must come from an authoritative ledger, not a caller-supplied guess.
 
 The simulation filters ineligible pods, ranks eligible pods by *smallest spare
 broker-reported capacity*, and breaks ties by pod ID for reproducibility.
@@ -51,6 +57,7 @@ nonfinite values, negative timestamps and JSON integers too large for a
 finite floating-point timestamp produce `invalid_snapshot` (exit 3),
 rather than an uncaught Python traceback. The synthetic regression
 suite includes both oversized `now_unix` and `observed_at_unix` cases.
+It also rejects projectless existing-job records and v1 schemas.
 This is an error-handling improvement, not real broker authentication or
 an expansion of permissible admission decisions.
 

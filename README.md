@@ -109,7 +109,10 @@ For an **offline, synthetic-tested GPU-placement planner**, see
 [the fleet admission reference](docs/fleet-admission-offline-demo.md), with
 [runnable standard-library code](examples/fleet_admission.py),
 [a fabricated pod snapshot](examples/fleet_snapshot.example.json) and
-[17 isolated tests](tests/test_fleet_admission.py). It performs no broker
+[24 isolated tests](tests/test_fleet_admission.py). Its v2 example snapshot
+requires existing-job records to include their project, and it checks
+idempotency on `(project, job_key)`. Version 1 snapshots are rejected
+rather than assigned an invented project. It performs no broker
 claim, scheduling, API request or pod creation.
 
 For the subsequent multi-pod GPU scheduling design and lessons learned, see
