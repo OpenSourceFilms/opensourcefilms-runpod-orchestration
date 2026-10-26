@@ -2,6 +2,8 @@
 """Offline GPU pod admission *planning* example. NEVER launches or reserves work.
 
 Snapshot fields and response shape are EXAMPLES, not any Runpod or OSF broker API.
+The v2 illustrative schema scopes duplicate job keys by project. Jobs without a
+known project cannot safely be checked for project-specific idempotency.
 A real scheduler must recheck and atomically reserve through the authenticated
 native GPU broker, record idempotent receipts and independently verify results.
 """
@@ -71,7 +73,7 @@ def _set(value: Any, label: str) -> set[str]:
 def plan(snapshot: dict) -> dict:
     """Return a deterministic, advisory result. No scheduling side effects."""
     snapshot = _mapping(snapshot, "snapshot")
-    if snapshot.get("schema") != "example.fleet-admission/1":
+    if snapshot.get("schema") != "example.fleet-admission/2":
         raise InvalidSnapshot("unknown snapshot schema")
     now = _timestamp(snapshot.get("now_unix"), "now_unix")
     max_age = _positive(snapshot.get("max_age_seconds"), "max_age_seconds")
@@ -89,10 +91,11 @@ def plan(snapshot: dict) -> dict:
     for index, item in enumerate(jobs):
         item = _mapping(item, "existing_jobs[%d]" % index)
         existing_key = _text(item.get("job_key"), "existing_jobs.job_key")
+        existing_project = _text(item.get("project"), "existing_jobs.project")
         state = _text(item.get("state"), "existing_jobs.state")
         if state not in ACTIVE_STATES | {"succeeded", "failed", "cancelled"}:
             raise InvalidSnapshot("unrecognised job state")
-        if existing_key == key and state in ACTIVE_STATES:
+        if existing_project == project and existing_key == key and state in ACTIVE_STATES:
             active_existing.append(state)
 
     pods = snapshot.get("pods")
@@ -162,7 +165,7 @@ def plan(snapshot: dict) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("snapshot", help="JSON fixture with example.fleet-admission/1 schema")
+    parser.add_argument("snapshot", help="JSON fixture with example.fleet-admission/2 schema")
     args = parser.parse_args(argv)
     try:
         with open(args.snapshot, "r", encoding="utf-8") as fp:
