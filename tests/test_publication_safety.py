@@ -74,7 +74,7 @@ class PublicationSafetyTests(unittest.TestCase):
             self.assertIn("successive workers", runpod)
         if 'KEY_B64="$(base64 -w0 "$KEY")"' in bootstrap:
             self.assertIn("Base64 is only an encoding", docs)
-        self.assertRegex(docs, r"(?:\\*\\*)?not(?:\\*\\*)? a hardened")
+        self.assertRegex(docs, r"(?:\*\*)?not(?:\*\*)? a hardened")
         self.assertIn("does not assess or modify", docs)
 
 
