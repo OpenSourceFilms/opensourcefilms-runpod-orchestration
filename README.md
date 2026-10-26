@@ -97,6 +97,13 @@ tests/selfcheck.sh    syntax + no-committed-secrets check
   `/workspace/_secrets/hf_token`, `OSF_MAIN_SSH_KEY_B64`) and never contain a
   real value in source.
 
+For an **offline, synthetic-tested GPU-placement planner**, see
+[the fleet admission reference](docs/fleet-admission-offline-demo.md), with
+[runnable standard-library code](examples/fleet_admission.py),
+[a fabricated pod snapshot](examples/fleet_snapshot.example.json) and
+[17 isolated tests](tests/test_fleet_admission.py). It performs no broker
+claim, scheduling, API request or pod creation.
+
 For the subsequent multi-pod GPU scheduling design and lessons learned, see
 [`docs/fleet-gpu-scheduling.md`](docs/fleet-gpu-scheduling.md). The actual
 privileged fleet service is not bundled here.

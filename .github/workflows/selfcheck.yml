@@ -8,6 +8,9 @@ on:
       - "worker_bootstrap/**"
       - "community_worker/**"
       - "tests/**"
+      - "examples/fleet_**"
+      - "docs/fleet-admission-offline-demo.md"
+      - "docs/fleet-gpu-scheduling.md"
   pull_request:
     paths:
       - ".github/workflows/selfcheck.yml"
@@ -15,6 +18,9 @@ on:
       - "worker_bootstrap/**"
       - "community_worker/**"
       - "tests/**"
+      - "examples/fleet_**"
+      - "docs/fleet-admission-offline-demo.md"
+      - "docs/fleet-gpu-scheduling.md"
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,3 +36,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Validate shell scripts and tracked secret patterns
         run: bash tests/selfcheck.sh
+      - name: Check synthetic fleet GPU admission and CLI
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_fleet_admission.py' -v
+          python3 -B examples/fleet_admission.py examples/fleet_snapshot.example.json
