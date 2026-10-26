@@ -39,14 +39,65 @@ class PlacementContract(unittest.TestCase):
         for state in ("queued", "leased", "running", "uncertain"):
             with self.subTest(state=state):
                 x = copy.deepcopy(self.data)
-                x["existing_jobs"].append({"job_key": x["request"]["job_key"], "state": state})
+                x["existing_jobs"].append({"project": x["request"]["project"], "job_key": x["request"]["job_key"], "state": state})
                 out = admission.plan(x)
                 self.assertEqual(out["status"], "already_registered")
                 self.assertIsNone(out["selected_pod"])
 
     def test_completed_earlier_job_does_not_block_new_candidate(self):
-        self.data["existing_jobs"] = [{"job_key": self.data["request"]["job_key"], "state": "succeeded"}]
+        self.data["existing_jobs"] = [{"project": self.data["request"]["project"], "job_key": self.data["request"]["job_key"], "state": "succeeded"}]
         self.assertEqual(admission.plan(self.data)["status"], "candidate_only")
+
+    def test_other_project_with_same_job_key_does_not_block_admission(self):
+        job_key = self.data["request"]["job_key"]
+        project = self.data["request"]["project"]
+        # The old v1 example deduplicated on job_key alone, incorrectly
+        # reporting an unrelated project's active job as this job.
+        self.data["existing_jobs"] = [
+            {"project": "other-project", "job_key": job_key, "state": "running"},
+            {"project": "other-project", "job_key": job_key, "state": "uncertain"},
+            {"project": project, "job_key": "some-other-job", "state": "running"},
+        ]
+        result = admission.plan(self.data)
+        self.assertEqual(result["status"], "candidate_only")
+        self.assertEqual(result["selected_pod"], "demo-gpu-b")
+
+    def test_exact_project_and_job_key_deduplicate_in_mixed_project_snapshot(self):
+        self.data["existing_jobs"] = [
+            {"project": "other-project", "job_key": self.data["request"]["job_key"], "state": "running"},
+            {"project": self.data["request"]["project"], "job_key": self.data["request"]["job_key"], "state": "leased"},
+        ]
+        result = admission.plan(self.data)
+        self.assertEqual(result["status"], "already_registered")
+        self.assertEqual(result["active_states"], ["leased"])
+        self.assertIsNone(result["selected_pod"])
+
+    def test_existing_job_without_authoritative_project_fails_closed(self):
+        self.data["existing_jobs"] = [
+            {"job_key": self.data["request"]["job_key"], "state": "running"},
+        ]
+        with self.assertRaisesRegex(admission.InvalidSnapshot, "existing_jobs.project"):
+            admission.plan(self.data)
+
+    def test_v1_snapshot_is_rejected_not_silently_reinterpreted(self):
+        self.data["schema"] = "example.fleet-admission/1"
+        with self.assertRaisesRegex(admission.InvalidSnapshot, "schema"):
+            admission.plan(self.data)
+
+    def test_cli_unscoped_existing_job_returns_invalid_snapshot_exit_three(self):
+        self.data["existing_jobs"] = [
+            {"job_key": self.data["request"]["job_key"], "state": "queued"},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            fixture = pathlib.Path(d) / "unscoped-job.json"
+            fixture.write_text(json.dumps(self.data))
+            result = subprocess.run(
+                [sys.executable, "-B", str(SCRIPT), str(fixture)],
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 3, result.stderr)
+            self.assertEqual(json.loads(result.stderr)["status"], "invalid_snapshot")
+            self.assertEqual(result.stdout, "")
 
     def test_rejects_future_clock_and_stale(self):
         self.data["pods"][0]["observed_at_unix"] = self.data["now_unix"] + 1
