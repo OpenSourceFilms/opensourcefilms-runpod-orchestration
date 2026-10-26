@@ -1,5 +1,5 @@
 {
-  "schema": "example.fleet-admission/1",
+  "schema": "example.fleet-admission/2",
   "now_unix": 1793000000,
   "max_age_seconds": 30,
   "request": {
