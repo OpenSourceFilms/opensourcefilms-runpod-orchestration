@@ -103,8 +103,8 @@ provided in this repository, and not a claim of fault-free multi-pod failover.
 
 The [offline fleet admission demonstration](fleet-admission-offline-demo.md)
 implements the candidate-filtering portion of this design with synthetic
-snapshots. It has 17 standard-library tests for stale/untrusted agents,
-project admission, native waiters, broker-reported VRAM, duplicate job keys
+snapshots. It has 24 standard-library tests for stale/untrusted agents,
+project admission, native waiters, broker-reported VRAM, project-scoped duplicate job keys
 and malformed inputs. This is **not** a native GPU reservation queue or a
 copy of OSF's production scheduler, and its output cannot authorise GPU
 execution. It does not contact RunPod APIs or consume credits.
