@@ -110,6 +110,40 @@ class PlacementContract(unittest.TestCase):
                 with self.assertRaises(admission.InvalidSnapshot):
                     admission.plan(self.data)
 
+    def test_huge_integer_timestamps_fail_closed(self):
+        huge = 10 ** 400
+        for field in ("now_unix", "observed_at_unix"):
+            with self.subTest(field=field):
+                snapshot = copy.deepcopy(self.data)
+                if field == "now_unix":
+                    snapshot["now_unix"] = huge
+                else:
+                    snapshot["pods"][0][field] = huge
+                with self.assertRaisesRegex(admission.InvalidSnapshot, "finite nonnegative"):
+                    admission.plan(snapshot)
+
+    def test_cli_huge_integer_timestamps_return_documented_exit_three(self):
+        huge = 10 ** 400
+        with tempfile.TemporaryDirectory() as d:
+            fixture = pathlib.Path(d) / "large-timestamp.json"
+            for field in ("now_unix", "observed_at_unix"):
+                with self.subTest(field=field):
+                    snapshot = copy.deepcopy(self.data)
+                    if field == "now_unix":
+                        snapshot["now_unix"] = huge
+                    else:
+                        snapshot["pods"][0][field] = huge
+                    fixture.write_text(json.dumps(snapshot))
+                    result = subprocess.run(
+                        [sys.executable, "-B", str(SCRIPT), str(fixture)],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    self.assertEqual(result.returncode, 3, result.stderr)
+                    error = json.loads(result.stderr)
+                    self.assertEqual(error["status"], "invalid_snapshot")
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual(result.stdout, "")
+
     def test_negative_waiters_and_nonboolean_health_fail(self):
         self.data["pods"][0]["native_waiters"] = -1
         with self.assertRaises(admission.InvalidSnapshot):

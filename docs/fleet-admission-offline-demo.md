@@ -46,6 +46,14 @@ broker-reported capacity*, and breaks ties by pod ID for reproducibility.
 It returns `candidate_only`, `no_eligible_pod`, `already_registered` or
 `invalid_snapshot`. CLI exit codes are respectively 0, 2, 0 and 3.
 
+Timestamp input validation is deliberately fail-closed. Numeric strings,
+nonfinite values, negative timestamps and JSON integers too large for a
+finite floating-point timestamp produce `invalid_snapshot` (exit 3),
+rather than an uncaught Python traceback. The synthetic regression
+suite includes both oversized `now_unix` and `observed_at_unix` cases.
+This is an error-handling improvement, not real broker authentication or
+an expansion of permissible admission decisions.
+
 ## Critical limitations
 
 **This never reserves capacity, starts an OSF job, starts a RunPod pod, checks

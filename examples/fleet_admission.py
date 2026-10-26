@@ -47,9 +47,19 @@ def _positive(value: Any, label: str) -> int:
 
 
 def _timestamp(value: Any, label: str) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+    if type(value) not in (int, float):
         raise InvalidSnapshot(label + " must be a finite nonnegative number")
-    return float(value)
+    # JSON integers are unbounded by Python's int type. math.isfinite(int)
+    # attempts a float conversion, which raises OverflowError for very large
+    # integer timestamps. Reject such snapshots with the normal CLI error
+    # instead of leaking an uncaught traceback.
+    try:
+        converted = float(value)
+    except (OverflowError, ValueError):
+        raise InvalidSnapshot(label + " must be a finite nonnegative number") from None
+    if not math.isfinite(converted) or converted < 0:
+        raise InvalidSnapshot(label + " must be a finite nonnegative number")
+    return converted
 
 
 def _set(value: Any, label: str) -> set[str]:
